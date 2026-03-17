@@ -25,7 +25,9 @@
       "Bash(ffprobe -show_entries format=duration -of csv=p=0 /mnt/c/Users/flavi/source/repos_visual_studio_code/TestAddonWow/sounds/key_e.ogg)",
       "Bash(mkdir -p /mnt/c/Users/flavi/source/repos_visual_studio_code/AssistedCombatAudio/images)",
       "Bash(mv /mnt/c/Users/flavi/source/repos_visual_studio_code/AssistedCombatAudio/icon.png /mnt/c/Users/flavi/source/repos_visual_studio_code/AssistedCombatAudio/images/)",
-      "Bash(mv /mnt/c/Users/flavi/source/repos_visual_studio_code/AssistedCombatAudio/icon.svg /mnt/c/Users/flavi/source/repos_visual_studio_code/AssistedCombatAudio/images/)"
+      "Bash(mv /mnt/c/Users/flavi/source/repos_visual_studio_code/AssistedCombatAudio/icon.svg /mnt/c/Users/flavi/source/repos_visual_studio_code/AssistedCombatAudio/images/)",
+      "Bash(git tag:*)",
+      "Bash(git:*)"
     ]
   }
 }
