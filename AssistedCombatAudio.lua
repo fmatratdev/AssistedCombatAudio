@@ -522,7 +522,7 @@ local function AnnounceSpell(spellID, forceRepeat)
         return
     end
 
-    DebugLog("|cff00ff00PLAY|r: " .. baseKey .. " (" .. GetSpellName(spellID) .. ")")
+    DebugLog("|cff00ff00PLAY|r: " .. baseKey .. " (" .. GetSpellName(spellID) .. " id:" .. spellID .. ")")
     PlayWithDuck(ADDON_PATH .. soundFile)
     lastAnnouncedSpellID = spellID
     lastAnnouncedTime = now
@@ -553,17 +553,22 @@ local function Tick()
     -- Grace period: block ALL announcements after cast/channel start
     if castGraceUntil > 0 then
         if now >= castGraceUntil then
-            DebugLog("GRACE_END: expired, reset currentSpellID")
-            currentSpellID = nil
+            -- Grace expired: always announce (player just cast, needs next instruction)
             castGraceUntil = 0
+            currentSpellID = nextSpell
+            DebugLog("GRACE_END: announce " .. GetSpellName(nextSpell) .. " (id:" .. nextSpell .. ")")
+            AnnounceSpell(nextSpell)
+            return
         else
             DebugLog("GRACE: blocked " .. GetSpellName(nextSpell) .. " (" .. format("%.1f", castGraceUntil - now) .. "s left)")
             return
         end
     end
 
-    -- Announce if spell changed
-    if nextSpell ~= currentSpellID then
+    -- Normal path: only announce if base spell changed (prevents re-announce from ID flickering)
+    local nextBase = C_SpellBook.FindBaseSpellByID(nextSpell) or nextSpell
+    local currentBase = currentSpellID and (C_SpellBook.FindBaseSpellByID(currentSpellID) or currentSpellID)
+    if nextBase ~= currentBase then
         currentSpellID = nextSpell
         AnnounceSpell(nextSpell)
     end
@@ -747,7 +752,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             local castBase = spellID and C_SpellBook.FindBaseSpellByID(spellID)
             local currentBase = C_SpellBook.FindBaseSpellByID(currentSpellID)
             if spellID == currentSpellID or castBase == currentBase then
-                castGraceUntil = GetTime() + 0.25
+                castGraceUntil = GetTime() + 0.2
             end
         end
 
@@ -758,7 +763,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
             if startTimeMS and endTimeMS then
                 local duration = (endTimeMS - startTimeMS) / 1000
                 if duration > 2 then
-                    castGraceUntil = GetTime() + duration * (2 / 3)
+                    castGraceUntil = GetTime() + duration * (1 / 3)
                 end
             end
         end
@@ -766,7 +771,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
         local unit = ...
         if unit == "player" then
-            castGraceUntil = GetTime() + 0.25
+            castGraceUntil = GetTime() + 0.2
         end
 
     elseif event == "ACTIONBAR_UPDATE_STATE" then
