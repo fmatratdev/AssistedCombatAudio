@@ -1,0 +1,9 @@
+## Interface: 120001
+## Title: Assisted Combat Audio
+## Notes: Plays audio cues telling you which key to press for the Assisted Combat recommended spell.
+## Author: Flavi
+## Version: 1.0.0
+## Category: Combat
+## SavedVariables: AssistedCombatAudioDB
+
+AssistedCombatAudio.lua
