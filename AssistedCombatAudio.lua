@@ -64,6 +64,9 @@ local updateInterval = 0.25
 local duckRestoreTimer
 local originalVolumes
 
+local castGraceUntil = 0
+local debugMode = false
+
 ---------------------------------------------------------------------------
 -- Utility
 ---------------------------------------------------------------------------
@@ -349,11 +352,28 @@ local function GetButtonsForSpellID(spellID)
     if not IsValidSpellID(spellID) then return end
     local baseSpellID = C_SpellBook.FindBaseSpellByID(spellID)
     local buttons = {}
+
+    -- Fast path: cached SpellIDByButton
     for buttonName, buttonSpellID in pairs(SpellIDByButton) do
         if _G[buttonName] and buttonSpellID == baseSpellID then
             buttons[#buttons + 1] = buttonName
         end
     end
+
+    -- Fallback: live check all known buttons (handles procs/overrides)
+    if #buttons == 0 then
+        for buttonName in pairs(BindingByButton) do
+            local btn = _G[buttonName]
+            if btn then
+                local btnSpell = GetSpellIDFromButton(buttonName)
+                if btnSpell and (btnSpell == spellID or C_SpellBook.FindBaseSpellByID(btnSpell) == baseSpellID) then
+                    buttons[#buttons + 1] = buttonName
+                    break
+                end
+            end
+        end
+    end
+
     return buttons
 end
 
@@ -452,21 +472,57 @@ end
 -- Core: announce
 ---------------------------------------------------------------------------
 
+local function GetSpellName(spellID)
+    if not spellID then return "nil" end
+    local info = C_Spell.GetSpellInfo(spellID)
+    return info and info.name or tostring(spellID)
+end
+
+local function DebugLog(msg)
+    if debugMode then print(PREFIX .. "|cff888888" .. msg .. "|r") end
+end
+
+local spellKeyCache = {}
+
 local function AnnounceSpell(spellID, forceRepeat)
     if not spellID then return end
 
     local baseKey, fullKey = GetKeyBindForSpellID(spellID)
-    if not baseKey then return end
-
-    local soundFile = KEY_TO_FILE[baseKey]
-    if not soundFile then return end
-
-    local now = GetTime()
-    -- Minimum 0.3s between sounds to avoid overlap
-    if (now - lastAnnouncedTime) < 0.3 then
+    if not baseKey then
+        baseKey = spellKeyCache[spellID]
+    end
+    if not baseKey then
+        DebugLog("NO_KEY: " .. GetSpellName(spellID) .. " (id:" .. spellID .. ") -> retry 0.15s")
+        C_Timer.After(0.15, function()
+            local key = GetKeyBindForSpellID(spellID)
+            if key then
+                spellKeyCache[spellID] = key
+                DebugLog("|cff00ff00RETRY_OK|r: " .. GetSpellName(spellID) .. " -> " .. key .. " (cached)")
+                if currentSpellID == spellID then
+                    AnnounceSpell(spellID)
+                end
+            else
+                DebugLog("RETRY_FAIL: " .. GetSpellName(spellID) .. " still not found")
+            end
+        end)
         return
     end
 
+    spellKeyCache[spellID] = baseKey
+
+    local soundFile = KEY_TO_FILE[baseKey]
+    if not soundFile then
+        DebugLog("NO_FILE: key " .. baseKey .. " has no sound file")
+        return
+    end
+
+    local now = GetTime()
+    if (now - lastAnnouncedTime) < 0.1 then
+        DebugLog("DEBOUNCE: " .. baseKey .. " blocked (" .. format("%.2f", now - lastAnnouncedTime) .. "s since last)")
+        return
+    end
+
+    DebugLog("|cff00ff00PLAY|r: " .. baseKey .. " (" .. GetSpellName(spellID) .. ")")
     PlayWithDuck(ADDON_PATH .. soundFile)
     lastAnnouncedSpellID = spellID
     lastAnnouncedTime = now
@@ -478,18 +534,38 @@ end
 
 local function Tick()
     if not ShouldBeActive() then
+        if debugMode and currentSpellID then DebugLog("INACTIVE: ShouldBeActive=false") end
         currentSpellID = nil
+
         return
     end
 
     local nextSpell = C_AssistedCombat.GetNextCastSpell(isDefaultUI)
-    if IsValidSpellID(nextSpell) then
-        if nextSpell ~= currentSpellID then
-            currentSpellID = nextSpell
-            AnnounceSpell(nextSpell)
-        end
-    else
+    if not IsValidSpellID(nextSpell) then
+        if debugMode and currentSpellID then DebugLog("NO_SPELL: API returned nothing valid") end
         currentSpellID = nil
+
+        return
+    end
+
+    local now = GetTime()
+
+    -- Grace period: block ALL announcements after cast/channel start
+    if castGraceUntil > 0 then
+        if now >= castGraceUntil then
+            DebugLog("GRACE_END: expired, reset currentSpellID")
+            currentSpellID = nil
+            castGraceUntil = 0
+        else
+            DebugLog("GRACE: blocked " .. GetSpellName(nextSpell) .. " (" .. format("%.1f", castGraceUntil - now) .. "s left)")
+            return
+        end
+    end
+
+    -- Announce if spell changed
+    if nextSpell ~= currentSpellID then
+        currentSpellID = nextSpell
+        AnnounceSpell(nextSpell)
     end
 end
 
@@ -504,6 +580,7 @@ local function StopTicker()
     ticker = nil
     currentSpellID = nil
     lastAnnouncedSpellID = nil
+    castGraceUntil = 0
 end
 
 ---------------------------------------------------------------------------
@@ -627,17 +704,11 @@ local frame = CreateFrame("Frame")
 frame:RegisterEvent("ADDON_LOADED")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("SPELLS_CHANGED")
-frame:RegisterEvent("PLAYER_REGEN_DISABLED")
-frame:RegisterEvent("PLAYER_REGEN_ENABLED")
-frame:RegisterEvent("PLAYER_TARGET_CHANGED")
 frame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 frame:RegisterEvent("ACTIONBAR_UPDATE_STATE")
 frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
-frame:RegisterEvent("GROUP_ROSTER_UPDATE")
-frame:RegisterEvent("ROLE_CHANGED_INFORM")
-frame:RegisterEvent("UNIT_ENTERED_VEHICLE")
-frame:RegisterEvent("UNIT_EXITED_VEHICLE")
 frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+frame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
 frame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
 
 frame:SetScript("OnEvent", function(self, event, ...)
@@ -673,38 +744,35 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, castGUID, spellID = ...
         if unit == "player" and currentSpellID then
-            -- Only reset if the player cast the spell we recommended
-            -- This prevents procs/trinkets from causing double announcements
             local castBase = spellID and C_SpellBook.FindBaseSpellByID(spellID)
             local currentBase = C_SpellBook.FindBaseSpellByID(currentSpellID)
             if spellID == currentSpellID or castBase == currentBase then
-                currentSpellID = nil
+                castGraceUntil = GetTime() + 0.25
+            end
+        end
+
+    elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
+        local unit = ...
+        if unit == "player" then
+            local _, _, _, startTimeMS, endTimeMS = UnitChannelInfo("player")
+            if startTimeMS and endTimeMS then
+                local duration = (endTimeMS - startTimeMS) / 1000
+                if duration > 2 then
+                    castGraceUntil = GetTime() + duration * (2 / 3)
+                end
             end
         end
 
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
         local unit = ...
         if unit == "player" then
-            currentSpellID = nil
-            C_Timer.After(0.05, Tick)
+            castGraceUntil = GetTime() + 0.25
         end
 
     elseif event == "ACTIONBAR_UPDATE_STATE" then
         -- Catches proc changes on action buttons (e.g. E key changing spell)
         UpdateAllButtonsSpellID()
 
-    elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED"
-        or event == "PLAYER_TARGET_CHANGED" then
-        currentSpellID = nil
-        lastAnnouncedSpellID = nil
-
-    elseif (event == "UNIT_ENTERED_VEHICLE" or event == "UNIT_EXITED_VEHICLE") and ... == "player" then
-        currentSpellID = nil
-        lastAnnouncedSpellID = nil
-
-    elseif event == "GROUP_ROSTER_UPDATE" or event == "ROLE_CHANGED_INFORM" then
-        currentSpellID = nil
-        lastAnnouncedSpellID = nil
     end
 end)
 
@@ -756,11 +824,16 @@ SlashCmdList["ASSISTEDCOMBATAUDIO"] = function(msg)
             print("  Spell: " .. (info and info.name or "?") .. " -> " .. (baseKey or "?"))
         end
 
+    elseif msg == "debug" then
+        debugMode = not debugMode
+        print(PREFIX .. "Debug: " .. (debugMode and "|cff00ff00ON|r" or "|cffff0000OFF|r"))
+
     else
         print(PREFIX .. "Commands:")
         print("  /aca - Open settings panel")
         print("  /aca on|off - Enable/disable")
         print("  /aca test - Play all sounds")
         print("  /aca status - Show current state")
+        print("  /aca debug - Toggle debug logging")
     end
 end
