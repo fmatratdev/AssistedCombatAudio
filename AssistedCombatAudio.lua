@@ -3,6 +3,10 @@ local addonName, ns = ...
 local ADDON_PATH = "Interface\\AddOns\\AssistedCombatAudio\\sounds\\"
 local PREFIX = "|cff00ccff[ACA]|r "
 
+local CAST_GRACE_DURATION = 0.2
+local CHANNEL_GRACE_RATIO = 1 / 3
+local ANNOUNCE_LOCK_TIMEOUT = 2
+
 local CHANNELS = { "Master", "SFX", "Dialog" }
 local DISPLAY_MODES = { "Toujours", "En combat uniquement", "Avec cible hostile", "Combat OU cible hostile" }
 
@@ -65,6 +69,8 @@ local duckRestoreTimer
 local originalVolumes
 
 local castGraceUntil = 0
+local announcedBaseID = nil
+local announcedUntil = 0
 local debugMode = false
 
 ---------------------------------------------------------------------------
@@ -526,6 +532,10 @@ local function AnnounceSpell(spellID, forceRepeat)
     PlayWithDuck(ADDON_PATH .. soundFile)
     lastAnnouncedSpellID = spellID
     lastAnnouncedTime = now
+
+    -- Lock: don't re-announce same base spell until cast starts or timeout
+    announcedBaseID = C_SpellBook.FindBaseSpellByID(spellID) or spellID
+    announcedUntil = now + ANNOUNCE_LOCK_TIMEOUT
 end
 
 ---------------------------------------------------------------------------
@@ -555,6 +565,8 @@ local function Tick()
         if now >= castGraceUntil then
             -- Grace expired: always announce (player just cast, needs next instruction)
             castGraceUntil = 0
+            announcedBaseID = nil
+            announcedUntil = 0
             currentSpellID = nextSpell
             DebugLog("GRACE_END: announce " .. GetSpellName(nextSpell) .. " (id:" .. nextSpell .. ")")
             AnnounceSpell(nextSpell)
@@ -569,6 +581,12 @@ local function Tick()
     local nextBase = C_SpellBook.FindBaseSpellByID(nextSpell) or nextSpell
     local currentBase = currentSpellID and (C_SpellBook.FindBaseSpellByID(currentSpellID) or currentSpellID)
     if nextBase ~= currentBase then
+        -- Lock check: don't re-announce same spell if player hasn't cast it yet
+        if announcedBaseID == nextBase and now < announcedUntil then
+            DebugLog("LOCKED: " .. GetSpellName(nextSpell) .. " already announced, waiting for cast")
+            currentSpellID = nextSpell
+            return
+        end
         currentSpellID = nextSpell
         AnnounceSpell(nextSpell)
     end
@@ -586,6 +604,8 @@ local function StopTicker()
     currentSpellID = nil
     lastAnnouncedSpellID = nil
     castGraceUntil = 0
+    announcedBaseID = nil
+    announcedUntil = 0
 end
 
 ---------------------------------------------------------------------------
@@ -712,6 +732,7 @@ frame:RegisterEvent("SPELLS_CHANGED")
 frame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
 frame:RegisterEvent("ACTIONBAR_UPDATE_STATE")
 frame:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED")
+frame:RegisterEvent("UNIT_SPELLCAST_START")
 frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 frame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_START")
 frame:RegisterEvent("UNIT_SPELLCAST_CHANNEL_STOP")
@@ -746,24 +767,39 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "ACTIONBAR_SLOT_CHANGED" then
         OnActionSlotChanged(...)
 
+    elseif event == "UNIT_SPELLCAST_START" then
+        local unit, castGUID, spellID = ...
+        if unit == "player" then
+            -- Player started casting: clear announce lock
+            local castBase = spellID and C_SpellBook.FindBaseSpellByID(spellID)
+            if announcedBaseID and (castBase == announcedBaseID or spellID == announcedBaseID) then
+                DebugLog("LOCK_CLEAR: " .. GetSpellName(spellID) .. " cast started")
+                announcedBaseID = nil
+                announcedUntil = 0
+            end
+        end
+
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         local unit, castGUID, spellID = ...
         if unit == "player" and currentSpellID then
             local castBase = spellID and C_SpellBook.FindBaseSpellByID(spellID)
             local currentBase = C_SpellBook.FindBaseSpellByID(currentSpellID)
             if spellID == currentSpellID or castBase == currentBase then
-                castGraceUntil = GetTime() + 0.2
+                castGraceUntil = GetTime() + CAST_GRACE_DURATION
             end
         end
 
     elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
         local unit = ...
         if unit == "player" then
+            -- Clear announce lock (channel = player pressed the key)
+            announcedBaseID = nil
+            announcedUntil = 0
             local _, _, _, startTimeMS, endTimeMS = UnitChannelInfo("player")
             if startTimeMS and endTimeMS then
                 local duration = (endTimeMS - startTimeMS) / 1000
                 if duration > 2 then
-                    castGraceUntil = GetTime() + duration * (1 / 3)
+                    castGraceUntil = GetTime() + duration * CHANNEL_GRACE_RATIO
                 end
             end
         end
@@ -771,7 +807,7 @@ frame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
         local unit = ...
         if unit == "player" then
-            castGraceUntil = GetTime() + 0.2
+            castGraceUntil = GetTime() + CAST_GRACE_DURATION
         end
 
     elseif event == "ACTIONBAR_UPDATE_STATE" then
