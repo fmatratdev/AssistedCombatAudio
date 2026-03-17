@@ -1,0 +1,28 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.curseforge.com)",
+      "Bash(ffmpeg -version)",
+      "Bash(pip3 list:*)",
+      "WebFetch(domain:warcraft.wiki.gg)",
+      "Bash(pip3 install:*)",
+      "Bash(python3 -m venv /tmp/tts_venv)",
+      "Bash(/tmp/tts_venv/bin/pip install:*)",
+      "WebFetch(domain:www.townlong-yak.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(cp /mnt/c/Users/flavi/source/repos_visual_studio_code/TestAddonWow/AssistedCombatAudio.toc \"/mnt/e/M2ssd_programefiles/World of Warcraft/_retail_/Interface/AddOns/AssistedCombatAudio/\")",
+      "Bash(cp /mnt/c/Users/flavi/source/repos_visual_studio_code/TestAddonWow/AssistedCombatAudio.lua \"/mnt/e/M2ssd_programefiles/World of Warcraft/_retail_/Interface/AddOns/AssistedCombatAudio/\")",
+      "Bash(cp -r /mnt/c/Users/flavi/source/repos_visual_studio_code/TestAddonWow/sounds \"/mnt/e/M2ssd_programefiles/World of Warcraft/_retail_/Interface/AddOns/AssistedCombatAudio/\")",
+      "Bash(for f:*)",
+      "Bash(do ffmpeg:*)",
+      "Bash(mv /tmp/loud_$f $f)",
+      "Bash(done)",
+      "Bash(ls -lh *.ogg)",
+      "Bash(ffprobe -show_entries format=duration -of csv=p=0 /mnt/c/Users/flavi/source/repos_visual_studio_code/TestAddonWow/sounds/key_t.ogg)",
+      "Bash(ffprobe -show_entries format=duration -of csv=p=0 /mnt/c/Users/flavi/source/repos_visual_studio_code/TestAddonWow/sounds/key_c.ogg)",
+      "Bash(ffprobe -show_entries format=duration -of csv=p=0 /mnt/c/Users/flavi/source/repos_visual_studio_code/TestAddonWow/sounds/key_a.ogg)",
+      "Bash(ffprobe -show_entries format=duration -of csv=p=0 /mnt/c/Users/flavi/source/repos_visual_studio_code/TestAddonWow/sounds/key_e.ogg)"
+    ]
+  }
+}
