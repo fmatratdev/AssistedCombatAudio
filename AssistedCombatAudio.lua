@@ -3,7 +3,7 @@ local addonName, ns = ...
 local ADDON_PATH = "Interface\\AddOns\\AssistedCombatAudio\\sounds\\"
 local PREFIX = "|cff00ccff[ACA]|r "
 
-local CAST_GRACE_DURATION = 0.2
+local CAST_GRACE_DURATION = 0.3
 local CHANNEL_GRACE_RATIO = 1 / 3
 local ANNOUNCE_LOCK_TIMEOUT = 2
 
